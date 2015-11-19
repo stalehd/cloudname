@@ -55,6 +55,7 @@
     <module>cn-service</module>
     <module>cn-memory</module>
     <module>cn-zookeeper</module>
+    <module>cn-config</module>
     <module>testtools</module>
     <module>log</module>
     <module>timber</module>
