@@ -4,8 +4,14 @@ import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
 import org.cloudname.core.LeaseListener;
+import org.cloudname.service.CloudnameService;
+import org.cloudname.service.Endpoint;
+import org.cloudname.service.InstanceCoordinate;
+import org.cloudname.service.LocalServiceListener;
+import org.cloudname.service.ServiceCoordinate;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
@@ -257,5 +263,81 @@ public class ConsulBackend implements CloudnameBackend {
     public void close() {
         watches.forEach((listener, watch) -> watch.stop());
         sessions.forEach((listener, session) -> session.close());
+    }
+
+    /**
+     * Add a listener to a @link{CloudnameService} instance to monitor the creation of services
+     * in Cloudname.
+     *
+     * <p>This is almost a circular dependency but not quite; the service library depends on the
+     * core cloudname library (which this library implements and depends on) but it is a marginal
+     * layer violation since this library implements the primitives the service library builds
+     * upon. It looks weird but luckily we've got lambads and listeners everywhere.
+     *
+     * <p>Some caution should be taken wrt locking: Since we're skipping across implementation
+     * layers and ultimately biting our own tail when using the callbacks we might end up in a
+     * deadlock if there's locks in both layers. In short: Avoid locking stuff in the listener's
+     * implementation.
+     */
+    public void monitorLocalServices(final CloudnameService cloudnameService) {
+        cloudnameService.registerServiceListener(new LocalServiceListener() {
+            @Override
+            public void serviceCreated(
+                    final ServiceCoordinate coordinate, final Endpoint endpoint) {
+
+                // Note that the service's health check is set to the key that represents
+                // the (permanent) service. If someone removes the key, ie unregisters it
+                // from Cloudname it will be marked as unhealthy.
+                consul.createService(coordinate.toCanonicalString(),
+                        endpoint.getName(), endpoint.getHost(), endpoint.getPort(),
+                        pathToEphemeralKv(coordinate.toCloudnamePath()));
+            }
+
+            @Override
+            public void serviceRemoved(final ServiceCoordinate coordinate) {
+                consul.removeService(coordinate.toCanonicalString());
+            }
+
+            @Override
+            public void endpointUpdate(
+                    final ServiceCoordinate coordinate, final Endpoint endpoint) {
+                consul.updateService(coordinate.toCanonicalString(),
+                        endpoint.getName(), endpoint.getHost(), endpoint.getPort());
+            }
+
+            @Override
+            public void instanceCreated(
+                    final InstanceCoordinate coordinate, final Collection<Endpoint> endpoints) {
+
+                // Do the same trickery here and set the service's health check to the ephemeral
+                // key that represents the service. If the service terminates then service will
+                // be marked unhealthy and reaped within 48 hours by Consul itself.
+                final String ephemeralPath
+                        = pathToEphemeralKv(coordinate.toCloudnamePath());
+
+                endpoints.forEach((endpoint) ->
+                    consul.createService(coordinate.toCanonicalString(),
+                            endpoint.getName(), endpoint.getHost(), endpoint.getPort(),
+                            ephemeralPath));
+            }
+
+            @Override
+            public void instanceRemoved(final InstanceCoordinate coordinate) {
+                consul.removeService(coordinate.toCanonicalString());
+            }
+
+            @Override
+            public void instanceEndpointAdded(
+                    final InstanceCoordinate coordinate, final Endpoint endpoint) {
+                consul.updateService(coordinate.toCanonicalString(),
+                        endpoint.getName(), endpoint.getHost(), endpoint.getPort());
+            }
+
+            @Override
+            public void instanceEndpointRemoved(
+                    final InstanceCoordinate coordinate, final Endpoint endpoint) {
+                consul.removeService(coordinate.toCanonicalString());
+            }
+        });
     }
 }

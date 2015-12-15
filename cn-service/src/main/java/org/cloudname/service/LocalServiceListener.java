@@ -10,29 +10,37 @@ import java.util.Collection;
  */
 public interface LocalServiceListener {
     /**
-     * Service is created successfully.
-     *
-     * @param coordinate The service's coordinate
-     * @param endpoint The service's data
+     * Permanent service entry is created.
      */
     void serviceCreated(ServiceCoordinate coordinate, Endpoint endpoint);
 
     /**
-     * Service is removed successfully.
-     * @param coordinate
+     * Permenet service entry is removed.
      */
     void serviceRemoved(ServiceCoordinate coordinate);
 
     /**
-     * Service data is updated.
+     * Endpoint for permament service entry is updated.
      */
     void endpointUpdate(ServiceCoordinate coordinate, Endpoint endpoint);
 
+    /**
+     * A (regular) service instance is created.
+     */
     void instanceCreated(InstanceCoordinate coordinate, Collection<Endpoint> endpoints);
 
+    /**
+     * A service instance is removed.
+     */
     void instanceRemoved(InstanceCoordinate coordinate);
 
+    /**
+     * An endpoint is added to a service.
+     */
     void instanceEndpointAdded(InstanceCoordinate coordinate, Endpoint endpoint);
 
+    /**
+     * An endpoint is removed from a service.
+     */
     void instanceEndpointRemoved(InstanceCoordinate coordinate, Endpoint endpoint);
 }

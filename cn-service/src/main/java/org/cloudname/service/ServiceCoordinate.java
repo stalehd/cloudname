@@ -124,9 +124,16 @@ public class ServiceCoordinate {
     }
 
     /**
+     * Get the coordinate's canonical path (in dotted format).
+     */
+    public String toCanonicalString() {
+        return toCloudnamePath().join('.');
+    }
+
+    /**
      * CloudnamePath representing this coordinate.
      */
-    /* package-private */ CloudnamePath toCloudnamePath() {
+    public CloudnamePath toCloudnamePath() {
         return new CloudnamePath(new String[] {this.region, this.tag, this.service});
     }
 

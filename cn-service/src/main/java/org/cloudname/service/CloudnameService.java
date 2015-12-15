@@ -6,12 +6,12 @@ import org.cloudname.core.LeaseHandle;
 import org.cloudname.core.LeaseListener;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,6 +30,8 @@ public class CloudnameService implements AutoCloseable {
     private final List<LeaseListener> permanentListeners = new ArrayList<>();
     private final Set<ServiceCoordinate> permanentUpdatesInProgress = new CopyOnWriteArraySet<>();
     private final Object syncObject = new Object();
+    private final List<LocalServiceListener> localServiceListeners = new ArrayList<>();
+    private final Executor listenerExecutor = Executors.newSingleThreadExecutor();
 
     /**
      * Create the service interface.
@@ -72,21 +74,29 @@ public class CloudnameService implements AutoCloseable {
         synchronized (syncObject) {
             handles.add(serviceHandle);
         }
-        notifyListener((l) -> l.instanceCreated(serviceHandle.getCoordinate(), serviceData.getEndpoints()));
+        notifyListener((listener) ->
+                listener.instanceCreated(serviceHandle.getCoordinate(),
+                        serviceData.getEndpoints()));
 
         // Notify the local listener of the changes
         serviceHandle.registerChangeListener(new LocalServiceHandleListener() {
+
             @Override
             public void endpointAdded(final Endpoint endpoint) {
-                notifyListener((n) -> n.instanceEndpointAdded(serviceHandle.getCoordinate(), endpoint));
+                notifyListener((listener) ->
+                        listener.instanceEndpointAdded(serviceHandle.getCoordinate(), endpoint));
             }
+
             @Override
             public void endpointRemoved(final Endpoint endpoint) {
-                notifyListener((n) -> n.instanceEndpointRemoved(serviceHandle.getCoordinate(), endpoint));
+                notifyListener((listener) ->
+                        listener.instanceEndpointRemoved(serviceHandle.getCoordinate(), endpoint));
             }
+
             @Override
             public void handleClosed() {
-                notifyListener((n) -> n.instanceRemoved(serviceHandle.getCoordinate()));
+                notifyListener((listener) ->
+                        listener.instanceRemoved(serviceHandle.getCoordinate()));
             }
         });
         return serviceHandle;
@@ -110,6 +120,7 @@ public class CloudnameService implements AutoCloseable {
         // Just create the corresponding listener on the backend and translate the parameters
         // from the listener.
         final LeaseListener leaseListener = new LeaseListener() {
+
             @Override
             public void leaseCreated(final CloudnamePath path, final String data) {
                 final InstanceCoordinate instanceCoordinate = new InstanceCoordinate(path);
@@ -137,8 +148,8 @@ public class CloudnameService implements AutoCloseable {
     }
 
     /**
-     * Create a permanent service. The service registration will be kept when the client exits. The
-     * service will have a single endpoint.
+     * Create a permanent service. The service registration will be kept when the client exits.
+     * The service will have a single endpoint.
      */
     public boolean createPermanentService(
             final ServiceCoordinate coordinate, final Endpoint endpoint) {
@@ -152,7 +163,7 @@ public class CloudnameService implements AutoCloseable {
         if (!backend.createPermanantLease(coordinate.toCloudnamePath(), endpoint.toJsonString())) {
             return false;
         }
-        notifyListener((l) -> l.serviceCreated(coordinate, endpoint));
+        notifyListener((listener) -> listener.serviceCreated(coordinate, endpoint));
         return true;
     }
 
@@ -194,7 +205,7 @@ public class CloudnameService implements AutoCloseable {
                 return false;
             }
 
-            notifyListener((l) -> l.endpointUpdate(coordinate, endpoint));
+            notifyListener((listener) -> listener.endpointUpdate(coordinate, endpoint));
             return true;
 
         } catch (final RuntimeException ex) {
@@ -216,7 +227,7 @@ public class CloudnameService implements AutoCloseable {
         if (!backend.removePermanentLease(coordinate.toCloudnamePath())) {
             return false;
         }
-        notifyListener((l) -> l.serviceRemoved(coordinate));
+        notifyListener((listener) -> listener.serviceRemoved(coordinate));
         return true;
     }
 
@@ -274,10 +285,22 @@ public class CloudnameService implements AutoCloseable {
      * only for internal service events in the local JVM, not globally. This feature
      */
     public void registerServiceListener(final LocalServiceListener listener) {
-
+        synchronized (syncObject) {
+            localServiceListeners.add(listener);
+        }
     }
 
     private void notifyListener(final Consumer<LocalServiceListener> notification) {
-
+        synchronized (syncObject) {
+            localServiceListeners.forEach((listener) ->
+                    listenerExecutor.execute(() ->
+                    {
+                        try {
+                            notification.accept(listener);
+                        } catch (final RuntimeException re) {
+                            LOG.log(Level.WARNING, "Got exception executing listener", re);
+                        }
+                    }));
+        }
     }
 }

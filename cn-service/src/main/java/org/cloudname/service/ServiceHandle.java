@@ -2,6 +2,11 @@ package org.cloudname.service;
 
 import org.cloudname.core.LeaseHandle;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -17,6 +22,9 @@ public class ServiceHandle implements AutoCloseable {
     private final LeaseHandle leaseHandle;
     private final InstanceCoordinate instanceCoordinate;
     private final ServiceData serviceData;
+    private final Executor listenerExecutor = Executors.newSingleThreadExecutor();
+    private final Object syncObject = new Object();
+    private final List<LocalServiceHandleListener> listeners = new ArrayList<>();
 
     /**
      * Construct ServiceHandle from @link{InstanceCoordinate}, @link{ServiceData} and
@@ -51,7 +59,11 @@ public class ServiceHandle implements AutoCloseable {
         if (!serviceData.addEndpoint(endpoint)) {
             return false;
         }
-        return this.leaseHandle.writeLeaseData(serviceData.toJsonString());
+        if (!this.leaseHandle.writeLeaseData(serviceData.toJsonString())) {
+            return false;
+        }
+        notifyListeners((listener) -> listener.endpointAdded(endpoint));
+        return true;
     }
 
     /**
@@ -63,18 +75,24 @@ public class ServiceHandle implements AutoCloseable {
         if (!serviceData.removeEndpoint(endpoint)) {
             return false;
         }
-        return this.leaseHandle.writeLeaseData(serviceData.toJsonString());
+        if (!this.leaseHandle.writeLeaseData(serviceData.toJsonString())) {
+            return false;
+        }
+        notifyListeners((listener) -> listener.endpointRemoved(endpoint));
+        return true;
     }
 
     @Override
     public void close() {
         try {
             leaseHandle.close();
+            notifyListeners((listener) -> listener.handleClosed());
         } catch (final Exception ex) {
             LOG.log(Level.WARNING, "Got exception closing lease for instance "
                     + instanceCoordinate.toCanonicalString(), ex);
         }
     }
+
 
     /**
      * Get the coordinate this @link{ServiceHandle} instance represents.
@@ -84,6 +102,21 @@ public class ServiceHandle implements AutoCloseable {
     }
 
     /* package-private */ void registerChangeListener(final LocalServiceHandleListener listener) {
-        // TODO: Implement it
+        synchronized (syncObject) {
+            listeners.add(listener);
+        }
+    }
+
+    private void notifyListeners(final Consumer<LocalServiceHandleListener> callback) {
+        synchronized (syncObject) {
+            listeners.forEach((listener) ->
+                    listenerExecutor.execute(() -> {
+                        try {
+                            callback.accept(listener);
+                        } catch (final RuntimeException re) {
+                            LOG.log(Level.WARNING, "Got exception notifying listener", re);
+                        }
+                    }));
+        }
     }
 }

@@ -237,4 +237,29 @@ public class Consul {
     public ConsulWatch createWatch(final String pathToWatch) {
         return new ConsulWatch(endpoint, pathToWatch);
     }
+
+
+    /**
+     * Register a service in Consul's catalog.
+     */
+    public boolean createService(final String serviceName,
+                                 final String endpointName, final String host, final int port,
+                                 final String pathToHealtCheckKey) {
+        return false;
+    }
+
+    /**
+     * Remove all services matching the given name.
+     */
+    public boolean removeService(final String serviceName) {
+        return false;
+    }
+
+    /**
+     * Update a service in Consul's catalog.
+     */
+    public boolean updateService(final String serviceName,
+                                 final String endpointName, final String host, final int port) {
+        return false;
+    }
 }

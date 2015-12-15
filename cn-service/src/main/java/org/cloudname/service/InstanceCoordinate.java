@@ -78,7 +78,7 @@ public class InstanceCoordinate {
     /**
      * A CloudnamePath instance representing this coordinate.
      */
-    /* package-private */ CloudnamePath toCloudnamePath() {
+    public CloudnamePath toCloudnamePath() {
         return new CloudnamePath(
                 new String[] {this.region, this.tag, this.service, this.instance});
     }
