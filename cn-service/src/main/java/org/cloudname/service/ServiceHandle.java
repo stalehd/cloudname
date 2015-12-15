@@ -82,4 +82,8 @@ public class ServiceHandle implements AutoCloseable {
     public InstanceCoordinate getCoordinate() {
         return instanceCoordinate;
     }
+
+    /* package-private */ void registerChangeListener(final LocalServiceHandleListener listener) {
+        // TODO: Implement it
+    }
 }

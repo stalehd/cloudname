@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,5 +124,9 @@ public class ServiceData {
             endpoints.add(Endpoint.fromJson(epList.getJSONObject(i).toString()));
         }
         return new ServiceData(endpoints);
+    }
+
+    /* package-private */ Collection<Endpoint> getEndpoints() {
+        return endpoints.values();
     }
 }

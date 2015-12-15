@@ -6,9 +6,12 @@ import org.cloudname.core.LeaseHandle;
 import org.cloudname.core.LeaseListener;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -69,6 +72,23 @@ public class CloudnameService implements AutoCloseable {
         synchronized (syncObject) {
             handles.add(serviceHandle);
         }
+        notifyListener((l) -> l.instanceCreated(serviceHandle.getCoordinate(), serviceData.getEndpoints()));
+
+        // Notify the local listener of the changes
+        serviceHandle.registerChangeListener(new LocalServiceHandleListener() {
+            @Override
+            public void endpointAdded(final Endpoint endpoint) {
+                notifyListener((n) -> n.instanceEndpointAdded(serviceHandle.getCoordinate(), endpoint));
+            }
+            @Override
+            public void endpointRemoved(final Endpoint endpoint) {
+                notifyListener((n) -> n.instanceEndpointRemoved(serviceHandle.getCoordinate(), endpoint));
+            }
+            @Override
+            public void handleClosed() {
+                notifyListener((n) -> n.instanceRemoved(serviceHandle.getCoordinate()));
+            }
+        });
         return serviceHandle;
     }
 
@@ -129,7 +149,11 @@ public class CloudnameService implements AutoCloseable {
             throw new IllegalArgumentException("Endpoint can't be null");
         }
 
-        return backend.createPermanantLease(coordinate.toCloudnamePath(), endpoint.toJsonString());
+        if (!backend.createPermanantLease(coordinate.toCloudnamePath(), endpoint.toJsonString())) {
+            return false;
+        }
+        notifyListener((l) -> l.serviceCreated(coordinate, endpoint));
+        return true;
     }
 
     /**
@@ -165,8 +189,14 @@ public class CloudnameService implements AutoCloseable {
         }
         permanentUpdatesInProgress.add(coordinate);
         try {
-            return backend.writePermanentLeaseData(
-                    coordinate.toCloudnamePath(), endpoint.toJsonString());
+            if (!backend.writePermanentLeaseData(
+                    coordinate.toCloudnamePath(), endpoint.toJsonString())) {
+                return false;
+            }
+
+            notifyListener((l) -> l.endpointUpdate(coordinate, endpoint));
+            return true;
+
         } catch (final RuntimeException ex) {
             LOG.log(Level.WARNING, "Got exception updating permanent lease. The system might be in"
                     + " an indeterminate state", ex);
@@ -183,7 +213,11 @@ public class CloudnameService implements AutoCloseable {
         if (coordinate == null) {
             throw new IllegalArgumentException("Coordinate can not be null");
         }
-        return backend.removePermanentLease(coordinate.toCloudnamePath());
+        if (!backend.removePermanentLease(coordinate.toCloudnamePath())) {
+            return false;
+        }
+        notifyListener((l) -> l.serviceRemoved(coordinate));
+        return true;
     }
 
     /**
@@ -233,5 +267,17 @@ public class CloudnameService implements AutoCloseable {
                 backend.removePermanentLeaseListener(listener);
             }
         }
+    }
+
+    /**
+     * Register a listener for service events happending through this interface. This listens
+     * only for internal service events in the local JVM, not globally. This feature
+     */
+    public void registerServiceListener(final LocalServiceListener listener) {
+
+    }
+
+    private void notifyListener(final Consumer<LocalServiceListener> notification) {
+
     }
 }
