@@ -18,7 +18,6 @@ import org.cloudname.service.ServiceHandle;
 import org.cloudname.service.ServiceListener;
 import org.json.JSONObject;
 
-import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
 /**
@@ -27,7 +26,6 @@ import java.util.logging.Logger;
  */
 public class PacServer {
     private static final Logger LOG = Logger.getLogger(PacServer.class.getName());
-    private final int httpPort = 4567;
 
     @Flag (name = "cloudname-url", description = "Cloudname URL", required = true)
     private static String cloudnameUrl = null;
@@ -35,15 +33,13 @@ public class PacServer {
     @Flag (name = "coordinate", description = "Service coordinate", required = false)
     private static String myCoordinate = "pacman.test.local";
 
-    private final CloudnameService service;
-
     public static final NotificationPublisher publisher = new NotificationPublisher();
 
     private PacServer() {
-        service = new CloudnameService(BackendManager.getBackend(cloudnameUrl));
+        /* nothing to do */
     }
 
-    private String getCreateNotification(
+    private static String getCreateNotification(
             final InstanceCoordinate coordinate, final ServiceData serviceData) {
         final Endpoint ep = serviceData.getEndpoint("http");
         return new JSONObject()
@@ -54,14 +50,25 @@ public class PacServer {
                 .toString();
     }
 
-    private String getRemoveNotification(final InstanceCoordinate coordinate) {
+    private static String getRemoveNotification(final InstanceCoordinate coordinate) {
         return new JSONObject()
                 .put("coordinate", coordinate.toCanonicalString())
                 .put("action", "removed")
                 .toString();
     }
 
-    private void connectToCloudname() {
+    /**
+     * Start the server. Registers in Cloudname, starts a heartbeat thread for the clients connected
+     * via web sockets and starts monitoring for services.
+     */
+    public static void main(final String[] args) {
+        new Flags().loadOpts(PacServer.class).parse(args);
+
+        final int httpPort = 4567;
+
+        final CloudnameService service
+                = new CloudnameService(BackendManager.getBackend(cloudnameUrl));
+
         final ServiceData myServiceData = new ServiceData();
         myServiceData.addEndpoint(new Endpoint("http", "0.0.0.0", httpPort));
 
@@ -100,30 +107,14 @@ public class PacServer {
             }
 
             LOG.info("Connected, using coordinate " + handle.getCoordinate().toCanonicalString());
-        }
-    }
 
-    private void startServer() {
-        port(httpPort);
-        staticFileLocation("/demoServerHtml");
-        webSocket("/messages", NotificationsWebSocket.class);
-        LOG.info("Starting server on port " + httpPort + "....");
-        init();
-    }
+            port(httpPort);
+            staticFileLocation("/demoServerHtml");
+            webSocket("/messages", NotificationsWebSocket.class);
+            LOG.info("Starting server on port " + httpPort + "....");
+            init();
 
-    /**
-     * Start the server. Registers in Cloudname, starts a heartbeat thread for the clients connected
-     * via web sockets and starts monitoring for services.
-     */
-    public static void main(final String[] args) {
-        new Flags().loadOpts(PacServer.class).parse(args);
-
-        final PacServer demoServer = new PacServer();
-
-        demoServer.connectToCloudname();
-
-        // Start publishing a heartbeat
-        Executors.newSingleThreadExecutor().execute(() -> {
+            // Start publishing a heartbeat
             while (true) {
                 try {
                     Thread.sleep(10000L);
@@ -135,9 +126,6 @@ public class PacServer {
                     throw new RuntimeException(ie);
                 }
             }
-        });
-
-        demoServer.startServer();
-
+        }
     }
 }

@@ -7,6 +7,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -15,6 +17,7 @@ import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriBuilder;
 
 /**
  * Consul interface. We have to roll our own since the existing libraries doesn't support watches
@@ -238,28 +241,85 @@ public class Consul {
         return new ConsulWatch(endpoint, pathToWatch);
     }
 
-
     /**
-     * Register a service in Consul's catalog.
+     * Register a service in Consul's catalog. The serviceId is unique while the name might
+     * not be unique. Tags are used to separate between endpoints.
      */
-    public boolean createService(final String serviceName,
-                                 final String endpointName, final String host, final int port,
-                                 final String pathToHealtCheckKey) {
-        return false;
+    public boolean createService(
+            final String serviceId, final String serviceName,
+            final String endpointName, final String host, final int port,
+            final String pathToHealtCheckKey) {
+
+        final UriBuilder uriBuilder = UriBuilder.fromUri(endpoint)
+                .path("/v1/kv")
+                .path(pathToHealtCheckKey);
+
+        final JSONObject requestBody = new JSONObject()
+                .put("ID", serviceId)
+                .put("Name", serviceName)
+                .put("Tags", new JSONArray()
+                        .put(endpointName))
+                .put("Address", host)
+                .put("Port", port)
+                .put("Check", new JSONObject()
+                        .put("HTTP", uriBuilder.build())
+                        .put("Interval", "10s"));
+
+        final Response response = httpClient
+                .target(endpoint)
+                .path("/v1/agent/service/register")
+                .request(MediaType.APPLICATION_JSON)
+                .put(Entity.text(requestBody.toString()));
+
+        if (response.getStatus() != Response.Status.OK.getStatusCode()) {
+            LOG.log(Level.WARNING, "Could not register service with request body "
+                    + requestBody.toString() + ". Got response "
+                    + response.getStatus() + " from Consul");
+            return false;
+        }
+        return true;
     }
 
     /**
-     * Remove all services matching the given name.
+     * Remove all services matching the given name. This queries the local catalog, gets the
+     * services with the specified name and removes them. Note that the name and ID aren't the same
+     * in Consul.
      */
     public boolean removeService(final String serviceName) {
-        return false;
-    }
+        final Response response  = httpClient
+                .target(endpoint)
+                .path("/v1/agent/services")
+                .request(MediaType.APPLICATION_JSON)
+                .get();
 
-    /**
-     * Update a service in Consul's catalog.
-     */
-    public boolean updateService(final String serviceName,
-                                 final String endpointName, final String host, final int port) {
+        if (response.getStatus() != Response.Status.OK.getStatusCode()) {
+            LOG.log(Level.WARNING, "Error retrieving services named " + serviceName
+                    + ". Response is " + response.getStatus());
+            return false;
+        }
+
+        final Set<String> servicesToRemove = new HashSet<>();
+        final JSONObject serviceList = new JSONObject(response.readEntity(String.class));
+
+        ((Set<String>)serviceList.keySet()).forEach((key) -> {
+            final JSONObject entry = serviceList.getJSONObject(key);
+            if (entry.getString("Service").equals(serviceName)) {
+                servicesToRemove.add(entry.getString("ID"));
+            }
+        });
+        servicesToRemove.forEach((serviceId) -> {
+            final int statusCode = httpClient
+                    .target(endpoint)
+                    .path("/v1/agent/service/deregister")
+                    .path(serviceId)
+                    .request(MediaType.APPLICATION_JSON)
+                    .put(Entity.text(""))
+                    .getStatus();
+            if (statusCode != Response.Status.OK.getStatusCode()) {
+                LOG.log(Level.WARNING, "Got error removing service with ID " + serviceId
+                        + ". Got response code " + statusCode);
+            }
+        });
         return false;
     }
 }

@@ -4,6 +4,9 @@ import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
 import org.cloudname.core.LeaseListener;
+import org.cloudname.service.listener.LocalServiceHandleListener;
+import org.cloudname.service.listener.LocalServiceListener;
+import org.cloudname.service.listener.LocalServiceSubscriber;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +47,10 @@ public class CloudnameService implements AutoCloseable {
             throw new IllegalArgumentException("Backend can not be null");
         }
         this.backend = backend;
+
+        if (backend instanceof LocalServiceSubscriber) {
+            registerServiceListener(((LocalServiceSubscriber)backend).getLocalServiceListener());
+        }
     }
 
     /**
@@ -284,7 +291,7 @@ public class CloudnameService implements AutoCloseable {
      * Register a listener for service events happending through this interface. This listens
      * only for internal service events in the local JVM, not globally. This feature
      */
-    public void registerServiceListener(final LocalServiceListener listener) {
+    private void registerServiceListener(final LocalServiceListener listener) {
         synchronized (syncObject) {
             localServiceListeners.add(listener);
         }

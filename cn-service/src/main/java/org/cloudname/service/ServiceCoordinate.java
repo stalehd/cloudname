@@ -127,7 +127,11 @@ public class ServiceCoordinate {
      * Get the coordinate's canonical path (in dotted format).
      */
     public String toCanonicalString() {
-        return toCloudnamePath().join('.');
+        return new StringBuffer()
+                .append(service).append(".")
+                .append(tag).append(".")
+                .append(region)
+                .toString();
     }
 
     /**

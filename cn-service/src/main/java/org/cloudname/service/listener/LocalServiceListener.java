@@ -1,4 +1,8 @@
-package org.cloudname.service;
+package org.cloudname.service.listener;
+
+import org.cloudname.service.Endpoint;
+import org.cloudname.service.InstanceCoordinate;
+import org.cloudname.service.ServiceCoordinate;
 
 import java.util.Collection;
 

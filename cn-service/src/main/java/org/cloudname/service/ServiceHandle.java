@@ -1,6 +1,7 @@
 package org.cloudname.service;
 
 import org.cloudname.core.LeaseHandle;
+import org.cloudname.service.listener.LocalServiceHandleListener;
 
 import java.util.ArrayList;
 import java.util.List;

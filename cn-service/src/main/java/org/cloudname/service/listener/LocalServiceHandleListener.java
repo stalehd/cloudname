@@ -1,4 +1,6 @@
-package org.cloudname.service;
+package org.cloudname.service.listener;
+
+import org.cloudname.service.Endpoint;
 
 /**
  * A listener for the local service handle. It gets callbacks whenever the client updates the
