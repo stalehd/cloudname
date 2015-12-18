@@ -277,6 +277,7 @@ public class Consul {
                     + response.getStatus() + " from Consul");
             return false;
         }
+        LOG.info("Created service named " + serviceName + " and ID " + serviceId);
         return true;
     }
 

@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
@@ -156,10 +155,9 @@ public class GhostService {
     public static void main(final String[] args) {
         new Flags().loadOpts(GhostService.class).parse(args);
         final GhostService service = new GhostService();
-        Executors.newSingleThreadExecutor().execute(() -> {
-            Spark.awaitInitialization();
-            service.connectToCloudname();
-        });
         service.setupWebserver();
+        Spark.awaitInitialization();
+        service.connectToCloudname();
+        System.exit(0);
     }
 }
