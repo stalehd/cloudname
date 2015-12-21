@@ -130,6 +130,11 @@ public abstract class CoreBackendTest {
                 public void dataChanged(final CloudnamePath path, final String data) {
                     dataCounter.countDown();
                 }
+
+                @Override
+                public void listenerClosed() {
+
+                }
             };
             backend.addTemporaryLeaseListener(rootPath, listener);
             final LeaseHandle handle = backend.createTemporaryLease(rootPath, firstData);
@@ -237,6 +242,11 @@ public abstract class CoreBackendTest {
                         assertThat(lastData.incrementAndGet(), is(Integer.parseInt(data)));
                         dataNotifications.countDown();
                     }
+
+                    @Override
+                    public void listenerClosed() {
+
+                    }
                 };
                 listeners.add(listener);
                 backend.addTemporaryLeaseListener(rootPath, listener);
@@ -319,6 +329,11 @@ public abstract class CoreBackendTest {
                         public void dataChanged(final CloudnamePath path, final String data) {
                             dataNotifications.countDown();
                         }
+
+                        @Override
+                        public void listenerClosed() {
+
+                        }
                     });
 
                     try {
@@ -382,6 +397,11 @@ public abstract class CoreBackendTest {
                 @Override
                 public void dataChanged(final CloudnamePath path, final String data) {
                 }
+
+                @Override
+                public void listenerClosed() {
+
+                }
             };
             backend.removeTemporaryLeaseListener(unknownnListener);
         }
@@ -422,6 +442,11 @@ public abstract class CoreBackendTest {
                         @Override
                         public void dataChanged(final CloudnamePath path, final String data) {
                             dataNotifications.incrementAndGet();
+                        }
+
+                        @Override
+                        public void listenerClosed() {
+
                         }
                     };
                 }
@@ -524,6 +549,11 @@ public abstract class CoreBackendTest {
                 numberOfNotifications.incrementAndGet();
                 dataLatch.countDown();
             }
+
+            @Override
+            public void listenerClosed() {
+
+            }
         };
 
         try (final CloudnameBackend backend = getBackend()) {
@@ -584,6 +614,11 @@ public abstract class CoreBackendTest {
                 public void dataChanged(final CloudnamePath path, final String data) {
                     assertThat(path, is(equalTo(permanentA)));
                 }
+
+                @Override
+                public void listenerClosed() {
+
+                }
             });
 
             backend.addPermanentLeaseListener(permanentB, new LeaseListener() {
@@ -601,6 +636,11 @@ public abstract class CoreBackendTest {
                 public void dataChanged(final CloudnamePath path, final String data) {
                     assertThat(path, is(equalTo(permanentB)));
                 }
+
+                @Override
+                public void listenerClosed() {
+
+                }
             });
 
             backend.addPermanentLeaseListener(permanentC, new LeaseListener() {
@@ -617,6 +657,11 @@ public abstract class CoreBackendTest {
                 @Override
                 public void dataChanged(final CloudnamePath path, final String data) {
                     fail("Did not expect any leases to be created at " + permanentC);
+                }
+
+                @Override
+                public void listenerClosed() {
+
                 }
             });
 
@@ -637,5 +682,9 @@ public abstract class CoreBackendTest {
         }
     }
 
+    /**
+     * Return a backend instance. The same instance may be returned multiple times but the test
+     * does not assume that.
+     */
     protected abstract CloudnameBackend getBackend();
 }

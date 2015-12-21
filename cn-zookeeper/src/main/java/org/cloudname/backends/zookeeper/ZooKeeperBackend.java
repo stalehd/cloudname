@@ -9,6 +9,7 @@ import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
+import org.cloudname.core.AvailabilityListener;
 import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
@@ -350,5 +351,10 @@ public class ZooKeeperBackend implements CloudnameBackend {
             }
             permanentListeners.clear();
         }
+    }
+
+    @Override
+    public void addAvailableListener(final AvailabilityListener listener) {
+        // TODO: Implement listener
     }
 }

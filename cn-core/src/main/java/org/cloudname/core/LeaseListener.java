@@ -28,4 +28,10 @@ public interface LeaseListener {
      * @param data The new data element stored in the lease
      */
     void dataChanged(final CloudnamePath path, final String data);
+
+
+    /**
+     * The listener has been closed. The lease might not be available after this.
+     */
+    void listenerClosed();
 }

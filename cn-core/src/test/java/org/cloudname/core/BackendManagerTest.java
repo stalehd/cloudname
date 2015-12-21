@@ -86,6 +86,11 @@ public class BackendManagerTest {
             public void close() throws Exception {
 
             }
+
+            @Override
+            public void addAvailableListener(AvailabilityListener listener) {
+
+            }
         };
     }
 

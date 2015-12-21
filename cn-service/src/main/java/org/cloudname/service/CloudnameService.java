@@ -109,6 +109,11 @@ public class CloudnameService implements AutoCloseable {
                 final ServiceData serviceData = ServiceData.fromJsonString(data);
                 listener.onServiceDataChanged(instanceCoordinate, serviceData);
             }
+
+            @Override
+            public void listenerClosed() {
+
+            }
         };
         synchronized (syncObject) {
             temporaryListeners.add(leaseListener);
@@ -212,6 +217,10 @@ public class CloudnameService implements AutoCloseable {
             @Override
             public void dataChanged(final CloudnamePath path, final String data) {
                 listener.onServiceChanged(Endpoint.fromJson(data));
+            }
+
+            @Override
+            public void listenerClosed() {
             }
         };
         synchronized (syncObject) {

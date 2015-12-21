@@ -1,5 +1,6 @@
 package org.cloudname.backends.consul;
 
+import org.cloudname.core.AvailabilityListener;
 import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
@@ -257,5 +258,10 @@ public class ConsulBackend implements CloudnameBackend {
     public void close() {
         watches.forEach((listener, watch) -> watch.stop());
         sessions.forEach((listener, session) -> session.close());
+    }
+
+    @Override
+    public void addAvailableListener(final AvailabilityListener listener) {
+        // TODO: Implement listener (and unavailable flag)
     }
 }
