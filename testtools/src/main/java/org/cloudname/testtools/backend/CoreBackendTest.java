@@ -8,7 +8,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeTrue;
 
+import org.cloudname.core.AvailabilityListener;
 import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
@@ -47,6 +49,36 @@ public abstract class CoreBackendTest {
     protected int getBackendPropagationTime() {
         return 100;
     }
+
+    /**
+     * Return a backend instance. The same instance may be returned multiple times but the test
+     * does not assume that.
+     */
+    protected abstract CloudnameBackend getBackend();
+
+    /**
+     * Override this in tests if the test can manipulate the availability state for the backend.
+     */
+    protected boolean canSetAvailability() {
+        return false;
+    }
+
+    /**
+     * This will be called by the test code to set the backend to available.
+     */
+    protected void setAvailable(final CloudnameBackend backend) {
+        // override in implementation
+    }
+
+    /**
+     * This will be called by the test to set the backend to unavailable. Note that the
+     * state might not be set to available so if the test reuses the backend instance returned
+     * by @link{getBackend} it should reset the state when the backend is closed.
+     */
+    protected void setUnavailable(final CloudnameBackend backend) {
+        // override in implementation
+    }
+
     /**
      * Ensure multiple clients can connect and that leases get an unique path for each client.
      */
@@ -306,67 +338,64 @@ public abstract class CoreBackendTest {
             final int n = numberOfClients - 1;
             final CountDownLatch removeNotifications = new CountDownLatch(n * (n + 1) / 2);
 
-            final Runnable clientProcess = new Runnable() {
-                @Override
-                public void run() {
-                    final String myData = Long.toHexString(random.nextLong());
-                    final LeaseHandle handle = backend.createTemporaryLease(rootLease, myData);
-                    assertThat("Got a valid handle back", handle, is(notNullValue()));
-                    backend.addTemporaryLeaseListener(rootLease, new LeaseListener() {
-                        @Override
-                        public void leaseCreated(final CloudnamePath path, final String data) {
-                            assertThat("Notification belongs to root path",
-                                    rootLease.isSubpathOf(path), is(true));
-                            createNotifications.countDown();
-                        }
-
-                        @Override
-                        public void leaseRemoved(final CloudnamePath path) {
-                            removeNotifications.countDown();
-                        }
-
-                        @Override
-                        public void dataChanged(final CloudnamePath path, final String data) {
-                            dataNotifications.countDown();
-                        }
-
-                        @Override
-                        public void listenerClosed() {
-
-                        }
-                    });
-
-                    try {
-                        assertThat(createNotifications.await(
-                                getBackendPropagationTime(), TimeUnit.MILLISECONDS),
-                                is(true));
-                    } catch (InterruptedException ie) {
-                        throw new RuntimeException(ie);
+            final Runnable clientProcess = () -> {
+                final String myData = Long.toHexString(random.nextLong());
+                final LeaseHandle handle = backend.createTemporaryLease(rootLease, myData);
+                assertThat("Got a valid handle back", handle, is(notNullValue()));
+                backend.addTemporaryLeaseListener(rootLease, new LeaseListener() {
+                    @Override
+                    public void leaseCreated(final CloudnamePath path, final String data) {
+                        assertThat("Notification belongs to root path",
+                                rootLease.isSubpathOf(path), is(true));
+                        createNotifications.countDown();
                     }
 
-                    // Change the data for my own lease, wait for it to propagate
-                    assertThat(handle.writeLeaseData(Long.toHexString(random.nextLong())),
+                    @Override
+                    public void leaseRemoved(final CloudnamePath path) {
+                        removeNotifications.countDown();
+                    }
+
+                    @Override
+                    public void dataChanged(final CloudnamePath path, final String data) {
+                        dataNotifications.countDown();
+                    }
+
+                    @Override
+                    public void listenerClosed() {
+
+                    }
+                });
+
+                try {
+                    assertThat(createNotifications.await(
+                            getBackendPropagationTime(), TimeUnit.MILLISECONDS),
                             is(true));
-                    try {
-                        Thread.sleep(getBackendPropagationTime());
-                    } catch (final InterruptedException ie) {
-                        throw new RuntimeException(ie);
-                    }
+                } catch (InterruptedException ie) {
+                    throw new RuntimeException(ie);
+                }
 
-                    try {
-                        assertThat(dataNotifications.await(
-                                getBackendPropagationTime(), TimeUnit.MILLISECONDS),
-                                is(true));
-                    } catch (InterruptedException ie) {
-                        throw new RuntimeException(ie);
-                    }
+                // Change the data for my own lease, wait for it to propagate
+                assertThat(handle.writeLeaseData(Long.toHexString(random.nextLong())),
+                        is(true));
+                try {
+                    Thread.sleep(getBackendPropagationTime());
+                } catch (final InterruptedException ie) {
+                    throw new RuntimeException(ie);
+                }
 
-                    // ..and close my lease
-                    try {
-                        handle.close();
-                    } catch (Exception ex) {
-                        throw new RuntimeException(ex);
-                    }
+                try {
+                    assertThat(dataNotifications.await(
+                            getBackendPropagationTime(), TimeUnit.MILLISECONDS),
+                            is(true));
+                } catch (InterruptedException ie) {
+                    throw new RuntimeException(ie);
+                }
+
+                // ..and close my lease
+                try {
+                    handle.close();
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
                 }
             };
 
@@ -493,16 +522,10 @@ public abstract class CoreBackendTest {
                 workers.add(leaseWorker2);
             }
 
-            for (final LeaseWorker worker : workers) {
-                worker.writeData();
-            }
+            workers.forEach(LeaseWorker::writeData);
             Thread.sleep(getBackendPropagationTime());
-            for (final LeaseWorker worker : workers) {
-                worker.checkNumberOfNotifications();
-            }
-            for (final LeaseWorker worker : workers) {
-                worker.closeLease();
-            }
+            workers.forEach(LeaseWorker::checkNumberOfNotifications);
+            workers.forEach(LeaseWorker::closeLease);
         }
     }
 
@@ -682,9 +705,212 @@ public abstract class CoreBackendTest {
         }
     }
 
-    /**
-     * Return a backend instance. The same instance may be returned multiple times but the test
-     * does not assume that.
-     */
-    protected abstract CloudnameBackend getBackend();
+    @Test
+    public void ensureUnavailableAvailableBackendNotifiesListener() throws Exception {
+        assumeTrue(canSetAvailability());
+
+        try (final CloudnameBackend backend = getBackend()) {
+
+            final CountDownLatch availableLatch = new CountDownLatch(1);
+            final CountDownLatch unavailableLatch = new CountDownLatch(1);
+
+            backend.addAvailableListener((newState) -> {
+                switch (newState) {
+                    case AVAILABLE:
+                        availableLatch.countDown();
+                        break;
+                    case UNAVAILABLE:
+                        unavailableLatch.countDown();
+                        break;
+                    default:
+                        break;
+                }
+            });
+
+            setUnavailable(backend);
+
+            assertThat(unavailableLatch.await(1000, TimeUnit.MILLISECONDS), is(true));
+
+            setAvailable(backend);
+
+            assertThat(availableLatch.await(1000, TimeUnit.MILLISECONDS), is(true));
+        }
+    }
+
+    @Test
+    public void ensureUnavailableNotifiesLeases() throws Exception {
+        assumeTrue(canSetAvailability());
+
+        try (final CloudnameBackend backend = getBackend()) {
+
+            final CloudnamePath createdPath = new CloudnamePath(new String[]{"existing"});
+            final CloudnamePath removedPath = new CloudnamePath(new String[]{"removed"});
+            final CloudnamePath nadaPath = new CloudnamePath(new String[]{"nothing", "atall"});
+
+            final CountDownLatch closeLatch = new CountDownLatch(4);
+            final CountDownLatch createLatch = new CountDownLatch(2);
+            final CountDownLatch removeLatch = new CountDownLatch(1);
+
+            // Add three listeners: One pointing to an existing leases, one to a removed lease
+            // and one pointing to a lease that has never existed and a permanent lease.
+            backend.addTemporaryLeaseListener(createdPath,
+                    new LeaseListener() {
+                        @Override
+                        public void leaseCreated(final CloudnamePath path, final String data) {
+                            createLatch.countDown();
+                        }
+
+                        @Override
+                        public void leaseRemoved(final CloudnamePath path) {
+
+                        }
+
+                        @Override
+                        public void dataChanged(final CloudnamePath path, final String data) {
+
+                        }
+
+                        @Override
+                        public void listenerClosed() {
+                            closeLatch.countDown();
+                        }
+                    });
+
+            backend.addTemporaryLeaseListener(removedPath,
+                    new LeaseListener() {
+                        @Override
+                        public void leaseCreated(final CloudnamePath path, final String data) {
+                            createLatch.countDown();
+                        }
+
+                        @Override
+                        public void leaseRemoved(final CloudnamePath path) {
+                            removeLatch.countDown();
+                        }
+
+                        @Override
+                        public void dataChanged(final CloudnamePath path, final String data) {
+
+                        }
+
+                        @Override
+                        public void listenerClosed() {
+                            closeLatch.countDown();
+                        }
+                    });
+
+            backend.addTemporaryLeaseListener(nadaPath,
+                    new LeaseListener() {
+                        @Override
+                        public void leaseCreated(final CloudnamePath path, final String data) {
+
+                        }
+
+                        @Override
+                        public void leaseRemoved(final CloudnamePath path) {
+
+                        }
+
+                        @Override
+                        public void dataChanged(final CloudnamePath path, final String data) {
+
+                        }
+
+                        @Override
+                        public void listenerClosed() {
+                            closeLatch.countDown();
+                        }
+                    });
+
+            backend.addPermanentLeaseListener(nadaPath, new LeaseListener() {
+                @Override
+                public void leaseCreated(final CloudnamePath path, final String data) {
+
+                }
+
+                @Override
+                public void leaseRemoved(final CloudnamePath path) {
+
+                }
+
+                @Override
+                public void dataChanged(final CloudnamePath path, final String data) {
+
+                }
+
+                @Override
+                public void listenerClosed() {
+                    closeLatch.countDown();
+                }
+            });
+
+            final LeaseHandle handle
+                    = backend.createTemporaryLease(removedPath, "Path to be removed");
+            Thread.sleep(getBackendPropagationTime());
+            handle.close();
+            Thread.sleep(getBackendPropagationTime());
+            backend.createTemporaryLease(createdPath, "Path to be created");
+
+
+            assertThat(createLatch.await(getBackendPropagationTime(), TimeUnit.MILLISECONDS),
+                    is(true));
+
+            assertThat(removeLatch.await(getBackendPropagationTime(), TimeUnit.MILLISECONDS),
+                    is(true));
+
+            setUnavailable(backend);
+
+            assertThat(closeLatch.await(getBackendPropagationTime(), TimeUnit.MILLISECONDS),
+                    is(true));
+        }
+    }
+
+    @Test
+    public void ensureLeaseHandlesAreImmutableWhenBackendIsUnavailable() throws Exception {
+        assumeTrue(canSetAvailability());
+        final CountDownLatch unavailableLatch = new CountDownLatch(1);
+
+        try (final CloudnameBackend backend = getBackend()) {
+            backend.addAvailableListener((newState) -> {
+                if (newState == AvailabilityListener.State.UNAVAILABLE) {
+                    unavailableLatch.countDown();
+                }
+            });
+
+            final LeaseHandle handle = backend.createTemporaryLease(
+                    new CloudnamePath(new String[] {"foo"}), "some random");
+            setUnavailable(backend);
+            unavailableLatch.await(getBackendPropagationTime(), TimeUnit.MILLISECONDS);
+
+            assertThat(handle.getLeasePath(), is(nullValue()));
+            assertThat(handle.writeLeaseData("anyData"), is(false));
+        }
+    }
+
+    @Test
+    public void ensurePermanentLeasesAreImmutableWhenBackendIsUnavailable() throws Exception {
+        assumeTrue(canSetAvailability());
+
+        final CountDownLatch unavailableLatch = new CountDownLatch(1);
+
+        try (final CloudnameBackend backend = getBackend()) {
+            backend.addAvailableListener((newState) -> {
+                if (newState == AvailabilityListener.State.UNAVAILABLE) {
+                    unavailableLatch.countDown();
+                }
+            });
+
+            assertThat(backend.createPermanantLease(
+                    new CloudnamePath(new String[] {"foo", "permanent"}), "something"), is(true));
+
+            setUnavailable(backend);
+            unavailableLatch.await(getBackendPropagationTime(), TimeUnit.MILLISECONDS);
+
+            final CloudnamePath somePath = new CloudnamePath(new String[] {"foo", "bar"});
+
+            assertThat(backend.createPermanantLease(somePath, "something"), is(false));
+            assertThat(backend.writePermanentLeaseData(somePath, "something"), is(false));
+            assertThat(backend.removePermanentLease(somePath), is(false));
+        }
+    }
 }

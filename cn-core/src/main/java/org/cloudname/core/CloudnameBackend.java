@@ -137,6 +137,8 @@ public interface CloudnameBackend extends AutoCloseable {
      * will be invalidated once the backend becomes unavailable. If the backend is able to recover
      * with the leases intact the existing leases is valid but the clients should not assume that
      * invalid leases can be restored.
+     *
+     * <p>Libraries built on top of this should expose this listener to clients.
      */
     void addAvailableListener(AvailabilityListener listener);
 }

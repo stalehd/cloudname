@@ -49,6 +49,7 @@ public class NodeCollectionWatcher {
      */
     public NodeCollectionWatcher(
             final ZooKeeper zk, final String pathToWatch, final NodeWatcherListener listener) {
+        LOG.info("Monitoring path " + pathToWatch);
         this.pathToWatch = pathToWatch;
         this.zk = zk;
         this.listener = listener;

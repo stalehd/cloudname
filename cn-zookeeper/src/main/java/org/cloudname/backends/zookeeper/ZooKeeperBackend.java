@@ -16,11 +16,14 @@ import org.cloudname.core.LeaseHandle;
 import org.cloudname.core.LeaseListener;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -42,6 +45,7 @@ public class ZooKeeperBackend implements CloudnameBackend {
     private final Map<LeaseListener, NodeCollectionWatcher> clientListeners = new HashMap<>();
     private final Map<LeaseListener, NodeCollectionWatcher> permanentListeners = new HashMap<>();
     private final Object syncObject = new Object();
+    private final AtomicBoolean unavailable = new AtomicBoolean(false);
 
     /**
      * @param connectionString ZooKeeper connection string
@@ -58,10 +62,47 @@ public class ZooKeeperBackend implements CloudnameBackend {
         } catch (final InterruptedException ie) {
             throw new IllegalStateException("Could not connect to ZooKeeper", ie);
         }
+        curator.getConnectionStateListenable().addListener((framework, state) -> {
+            switch (state) {
+                case LOST:
+                    // Session has expired. Ephemeral nodes are gone.
+                    setUnavailable();
+                    break;
+                case READ_ONLY:
+                    // emit READ_ONLY state to listeners
+                    notifyAvailability((listener)
+                            -> listener.availabilityChange(AvailabilityListener.State.READ_ONLY));
+                    break;
+                case RECONNECTED:
+                    // Suspended lost or read-only connection is back up
+                    setAvailable();
+                    break;
+                case CONNECTED:
+                    // First successful connection (do not expect this to be trigger since we're
+                    // waiting for the connection above.
+                    LOG.warning("Did not expect ZooKeeper state CONNECTED here");
+                    notifyAvailability((listener)
+                            -> listener.availabilityChange(AvailabilityListener.State.AVAILABLE));
+                    break;
+                case SUSPENDED:
+                    // Connection to the cluster is lost
+                    setUnavailable();
+                    break;
+                default:
+                    // Unknown state. Going to assume that this connection is lost.
+                    LOG.warning("Unknown connection state from ZooKeeper listener: " + state);
+                    setUnavailable();
+                    break;
+            }
+        });
     }
 
     @Override
     public LeaseHandle createTemporaryLease(final CloudnamePath path, final String data) {
+        if (unavailable.get()) {
+            return null;
+        }
+
         boolean created = false;
         CloudnamePath tempInstancePath = null;
         String tempZkPath = null;
@@ -87,6 +128,10 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
             @Override
             public boolean writeLeaseData(final String data) {
+                if (unavailable.get()) {
+                    LOG.info("Attempt to write lease data to closed lease");
+                    return false;
+                }
                 if (closed.get()) {
                     LOG.info("Attempt to write data to closed leased handle " + data);
                     return false;
@@ -96,7 +141,7 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
             @Override
             public CloudnamePath getLeasePath() {
-                if (closed.get()) {
+                if (closed.get() || unavailable.get()) {
                     return null;
                 }
                 return instancePath;
@@ -104,7 +149,7 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
             @Override
             public void close() throws IOException {
-                if (closed.get()) {
+                if (closed.get() || unavailable.get()) {
                     return;
                 }
                 try {
@@ -119,6 +164,10 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public boolean writeTemporaryLeaseData(final CloudnamePath path, final String data) {
+        if (unavailable.get()) {
+            return false;
+        }
+
         final String zkPath = TEMPORARY_ROOT + path.join('/');
         try {
             final Stat nodeStat = curator.checkExists().forPath(zkPath);
@@ -137,7 +186,7 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public String readTemporaryLeaseData(final CloudnamePath path) {
-        if (path == null) {
+        if (path == null || unavailable.get()) {
             return null;
         }
         final String zkPath = TEMPORARY_ROOT + path.join('/');
@@ -209,6 +258,9 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public boolean createPermanantLease(final CloudnamePath path, final String data) {
+        if (unavailable.get()) {
+            return false;
+        }
         final String zkPath = PERMANENT_ROOT + path.join('/');
         try {
             curator.sync().forPath(zkPath);
@@ -230,6 +282,9 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public boolean removePermanentLease(final CloudnamePath path) {
+        if (unavailable.get()) {
+            return false;
+        }
         final String zkPath = PERMANENT_ROOT + path.join('/');
         try {
             final Stat nodeStat = curator.checkExists().forPath(zkPath);
@@ -248,6 +303,9 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public boolean writePermanentLeaseData(final CloudnamePath path, final String data) {
+        if (unavailable.get()) {
+            return false;
+        }
         final String zkPath = PERMANENT_ROOT + path.join('/');
         try {
             curator.sync().forPath(zkPath);
@@ -270,6 +328,9 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public String readPermanentLeaseData(final CloudnamePath path) {
+        if (unavailable.get()) {
+            return null;
+        }
         final String zkPath = PERMANENT_ROOT + path.join('/');
         try {
             curator.sync().forPath(zkPath);
@@ -353,8 +414,46 @@ public class ZooKeeperBackend implements CloudnameBackend {
         }
     }
 
+    private final List<AvailabilityListener> availabilityListeners = new ArrayList<>();
+
     @Override
     public void addAvailableListener(final AvailabilityListener listener) {
-        // TODO: Implement listener
+        synchronized (syncObject) {
+            availabilityListeners.add(listener);
+        }
+    }
+
+    /* package-private */ void setUnavailable() {
+        // Close all leases
+        synchronized (syncObject) {
+            clientListeners.keySet().forEach(LeaseListener::listenerClosed);
+            clientListeners.values().forEach(NodeCollectionWatcher::shutdown);
+            clientListeners.clear();
+
+            permanentListeners.keySet().forEach(LeaseListener::listenerClosed);
+            permanentListeners.values().forEach(NodeCollectionWatcher::shutdown);
+            permanentListeners.clear();
+        }
+        unavailable.set(true);
+        notifyAvailability((listener)
+                -> listener.availabilityChange(AvailabilityListener.State.UNAVAILABLE));
+    }
+
+    /* package-private */ void setAvailable() {
+        unavailable.set(false);
+        notifyAvailability((listener)
+                -> listener.availabilityChange(AvailabilityListener.State.AVAILABLE));
+    }
+
+    private void notifyAvailability(final Consumer<AvailabilityListener> listenerCallback) {
+        synchronized (syncObject) {
+            availabilityListeners.forEach((listener) -> {
+                try {
+                    listenerCallback.accept(listener);
+                } catch (final RuntimeException re) {
+                    LOG.log(Level.WARNING, "Got exception invoking listener", re);
+                }
+            });
+        }
     }
 }
