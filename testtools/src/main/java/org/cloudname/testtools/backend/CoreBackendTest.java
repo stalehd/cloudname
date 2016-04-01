@@ -9,11 +9,13 @@ import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import org.cloudname.core.BackendListener;
 import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
 import org.cloudname.core.LeaseListener;
 import org.cloudname.core.LeaseType;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -684,5 +686,98 @@ public abstract class CoreBackendTest {
         }
     }
 
+    @Ignore
+    @Test
+    public void ensureServiceGoesUpAndDown() throws Exception {
+        final CloudnameBackend backend = getBackend();
+
+        final CloudnamePath leasePath = new CloudnamePath(new String[] {"foo", "bar"});
+
+        final CountDownLatch createdLatch = new CountDownLatch(1);
+        final CountDownLatch removeLatch = new CountDownLatch(1);
+
+        backend.addLeaseListener(leasePath, new LeaseListener() {
+            @Override
+            public void leaseCreated(final CloudnamePath path, final String data) {
+                createdLatch.countDown();
+            }
+
+            @Override
+            public void leaseRemoved(final CloudnamePath path) {
+                removeLatch.countDown();
+            }
+
+            @Override
+            public void dataChanged(final CloudnamePath path, final String data) {
+
+            }
+        });
+
+        final CountDownLatch availableLatch = new CountDownLatch(1);
+        final CountDownLatch unavailableLatch = new CountDownLatch(1);
+        backend.addBackendListener(new BackendListener() {
+            @Override
+            public void backendIsAvailable() {
+                availableLatch.countDown();
+            }
+
+            @Override
+            public void backendIsUnavailable() {
+                unavailableLatch.countDown();
+            }
+        });
+        {
+            // Create a new lease; ensure it can be updated
+            final LeaseHandle handle
+                    = backend.createLease(LeaseType.TEMPORARY, leasePath, "Some data");
+            assertThat(handle, is(notNullValue()));
+            assertThat(handle.writeData("Some other data"), is(true));
+
+            // Set service unavailable; it can't be modified
+            setBackendUnavailable();
+
+            assertThat(unavailableLatch.await(100, TimeUnit.MILLISECONDS), is(true));
+
+            assertThat(handle.writeData("Some other other data"), is(false));
+
+            assertThat(backend.createLease(LeaseType.TEMPORARY, null, null), is(nullValue()));
+        }
+
+        assertThat(createdLatch.await(100, TimeUnit.MILLISECONDS), is(true));
+        assertThat(removeLatch.await(100, TimeUnit.MILLISECONDS), is(true));
+
+        // A new lease can't be created
+        assertThat(backend.createLease(LeaseType.TEMPORARY, leasePath, "Some data"),
+                is(nullValue()));
+
+        // ...until the backend is back up
+        setBackendAvailable();
+
+        assertThat(availableLatch.await(100, TimeUnit.MILLISECONDS), is(true));
+
+        {
+            // Create a new lease; ensure it can be updated
+            final LeaseHandle handle
+                    = backend.createLease(LeaseType.TEMPORARY, leasePath, "Some data");
+            assertThat(handle, is(notNullValue()));
+            assertThat(handle.writeData("Some other data"), is(true));
+            assertThat(handle.writeData("Some other other data"), is(true));
+        }
+
+    }
+
+    /**
+     * Create a backend instance.
+     */
     protected abstract CloudnameBackend getBackend();
+
+    /**
+     * Re-enable the backend after it has been disabled.
+     */
+    protected abstract void setBackendAvailable();
+
+    /**
+     * Disable the backend, emulating either a failure or network partition.
+     */
+    protected abstract void setBackendUnavailable();
 }

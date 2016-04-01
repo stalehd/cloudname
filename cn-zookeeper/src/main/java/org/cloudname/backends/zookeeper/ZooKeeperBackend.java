@@ -5,9 +5,14 @@ import com.google.common.base.Charsets;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.api.CuratorEvent;
+import org.apache.curator.framework.api.CuratorListener;
+import org.apache.curator.framework.state.ConnectionState;
+import org.apache.curator.framework.state.ConnectionStateListener;
 import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.data.Stat;
+import org.cloudname.core.BackendListener;
 import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
@@ -15,10 +20,13 @@ import org.cloudname.core.LeaseListener;
 import org.cloudname.core.LeaseType;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -37,7 +45,7 @@ public class ZooKeeperBackend implements CloudnameBackend {
     private final Map<LeaseListener, NodeCollectionWatcher> collectionListeners = new HashMap<>();
     private final Map<LeaseListener, NodeCollectionWatcher> leaseListeners = new HashMap<>();
     private final Object syncObject = new Object();
-
+    private final AtomicBoolean connectionAlive = new AtomicBoolean(false);
     /**
      * @param connectionString ZooKeeper connection string
      * @throws IllegalStateException if the cluster isn't available.
@@ -49,14 +57,58 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
         try {
             curator.blockUntilConnected(CONNECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            connectionAlive.set(true);
             LOG.info("Connected to zk cluster @ " + connectionString);
         } catch (final InterruptedException ie) {
             throw new IllegalStateException("Could not connect to ZooKeeper", ie);
         }
+        curator.getConnectionStateListenable().addListener(new ConnectionStateListener() {
+            @Override
+            public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
+                switch (connectionState) {
+                    case CONNECTED:
+                        LOG.info("ZooKeeper connection is in CONNECTED state");
+                        if (connectionAlive.compareAndSet(false, true)) {
+                            notifyBackendListener(BackendListener::backendIsAvailable);
+                        }
+                        break;
+                    case RECONNECTED:
+                        LOG.info("ZooKeeper connection is in RECONNECTED state");
+                        if (connectionAlive.compareAndSet(false, true)) {
+                            notifyBackendListener(BackendListener::backendIsAvailable);
+                        }
+                        break;
+                    case LOST:
+                        LOG.severe("ZooKeeper connection is in LOST state");
+                        if (connectionAlive.compareAndSet(true, false)) {
+                            dropAllLeases();
+                            notifyBackendListener(BackendListener::backendIsUnavailable);
+                        }
+                        break;
+                    case READ_ONLY:
+                        // TODO: Determine what to do; the backend is read only
+                        LOG.warning("ZooKeeper connection is in READ_ONLY state");
+                        if (connectionAlive.compareAndSet(true, false)) {
+                            notifyBackendListener(BackendListener::backendIsUnavailable);
+                        }
+                        break;
+                    case SUSPENDED:
+                        LOG.warning("ZooKeeper connection is in SUSPENDED state");
+                        if (connectionAlive.compareAndSet(true, false)) {
+                            dropAllLeases();
+                            notifyBackendListener(BackendListener::backendIsUnavailable);
+                        }
+                        break;
+                }
+            }
+        });
     }
 
     @Override
     public boolean writeLeaseData(final CloudnamePath path, final String data) {
+        if (!connectionAlive.get()) {
+            return false;
+        }
         final String zkPath = ZK_ROOT + path.join('/');
         try {
             final Stat nodeStat = curator.checkExists().forPath(zkPath);
@@ -75,6 +127,9 @@ public class ZooKeeperBackend implements CloudnameBackend {
 
     @Override
     public String readLeaseData(final CloudnamePath path) {
+        if (!connectionAlive.get()) {
+            return null;
+        }
         if (path == null) {
             return null;
         }
@@ -191,9 +246,14 @@ public class ZooKeeperBackend implements CloudnameBackend {
         }
     }
 
+    private List<LeaseHandle> createdLeases = new ArrayList<>();
+
     @Override
     public LeaseHandle createLease(
             final LeaseType type, final CloudnamePath path, final String data) {
+        if (!connectionAlive.get()) {
+            return null;
+        }
         if (type == null || path == null || data == null) {
             return null;
         }
@@ -216,7 +276,7 @@ public class ZooKeeperBackend implements CloudnameBackend {
                             + " - Curator returned null on create()");
                     return null;
                 }
-                return new LeaseHandle() {
+                final LeaseHandle leaseHandle = new LeaseHandle() {
                     private AtomicBoolean closed = new AtomicBoolean(false);
 
                     @Override
@@ -249,6 +309,10 @@ public class ZooKeeperBackend implements CloudnameBackend {
                         }
                     }
                 };
+                synchronized (syncObject) {
+                    createdLeases.add(leaseHandle);
+                }
+                return leaseHandle;
             }
 
             LOG.log(Level.INFO, "Attempt to create node at " + path
@@ -288,4 +352,34 @@ public class ZooKeeperBackend implements CloudnameBackend {
             leaseListeners.clear();
         }
     }
+
+    private void dropAllLeases() {
+        synchronized (syncObject) {
+            // Close all lease handles returned.
+            createdLeases.forEach((leaseHandle -> {
+                try {
+                    leaseHandle.close();
+                } catch (final Exception ex) {
+                    // ignore
+                    LOG.log(Level.WARNING, "Got exception closing lease handle", ex);
+                }
+            }));
+            createdLeases.clear();
+        }
+    }
+
+    private void notifyBackendListener(final Consumer<BackendListener> action) {
+        synchronized (syncObject) {
+            backendListeners.forEach(action);
+        }
+    }
+    private final List<BackendListener> backendListeners = new ArrayList<>();
+
+    @Override
+    public void addBackendListener(final BackendListener listener) {
+        synchronized (syncObject) {
+            backendListeners.add(listener);
+        }
+    }
+
 }

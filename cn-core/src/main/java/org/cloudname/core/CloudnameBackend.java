@@ -110,4 +110,11 @@ public interface CloudnameBackend extends AutoCloseable {
      * @param listener the listener to remove
      */
     void removeLeaseListener(final LeaseListener listener);
+
+    /**
+     * Listen to backend events.
+     *
+     * @param listener Listener for backend
+     */
+    void addBackendListener(final BackendListener listener);
 }

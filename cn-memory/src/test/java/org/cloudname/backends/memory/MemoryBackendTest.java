@@ -21,4 +21,15 @@ public class MemoryBackendTest extends CoreBackendTest {
         return BACKEND;
     }
 
+    @Override
+    protected void setBackendUnavailable() {
+        ((MemoryBackend)getBackend()).disable();
+    }
+
+    @Override
+    protected void setBackendAvailable() {
+        ((MemoryBackend)getBackend()).enable();
+    }
+
+
 }

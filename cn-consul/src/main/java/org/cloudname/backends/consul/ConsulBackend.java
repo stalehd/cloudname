@@ -1,5 +1,6 @@
 package org.cloudname.backends.consul;
 
+import org.cloudname.core.BackendListener;
 import org.cloudname.core.CloudnameBackend;
 import org.cloudname.core.CloudnamePath;
 import org.cloudname.core.LeaseHandle;
@@ -100,8 +101,16 @@ public class ConsulBackend implements CloudnameBackend {
     private LeaseHandle createTemporary(final CloudnamePath path, final String data) {
         // Create session with TTL set to <something> and Behavior=delete. The session isn't
         // used to uniquely identify the client but to create ephemeral values in the KV store.
-        final ConsulSession session
-                = consul.createSession(pathToSession(path), SESSION_TTL, LOCK_DELAY);
+        final ConsulSessionListener sessionListener = new ConsulSessionListener() {
+            @Override
+            public void sessionExpired(String sessionId) {
+                // Consul agent (or cluster) is unavailable; leases will be expired
+                // TODO:Start a new thread to wait for the agent/cluster to become available again.
+            }
+        };
+
+        final ConsulSession session = consul.createSession(
+                pathToSession(path), SESSION_TTL, LOCK_DELAY, sessionListener);
         // Create value in KV and set the session owner. cas = 0 to ensure no duplicates. The KV
         // entry is the canonical lease
         boolean leaseAcquired = false;
@@ -271,5 +280,10 @@ public class ConsulBackend implements CloudnameBackend {
     public void close() {
         watches.forEach((listener, watch) -> watch.stop());
         sessions.forEach((listener, session) -> session.close());
+    }
+
+    @Override
+    public void addBackendListener(final BackendListener listener) {
+
     }
 }

@@ -27,6 +27,7 @@ public class ZooKeeperBackendTest extends CoreBackendTest {
         testCluster.stop();
     }
 
+    @Override
     protected CloudnameBackend getBackend() {
         if (backend.get() == null) {
             backend.compareAndSet(null,
@@ -34,5 +35,25 @@ public class ZooKeeperBackendTest extends CoreBackendTest {
         }
         return backend.get();
 
+    }
+
+    @Override
+    protected void setBackendAvailable() {
+        try {
+            testCluster.start();
+            Thread.sleep(3000);
+        } catch (final Exception ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    @Override
+    protected void setBackendUnavailable() {
+        try {
+            testCluster.stop();
+            Thread.sleep(1000);
+        } catch (final Exception ex) {
+            throw new RuntimeException(ex);
+        }
     }
 }

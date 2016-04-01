@@ -91,10 +91,12 @@ public class Consul {
      *                  the purpose of this parameter. The explanation can most likely be found in
      *                  http://research.google.com/archive/chubby.html
      */
-    public ConsulSession createSession(final String name, final int ttlMs, final int lockDelay) {
+    public ConsulSession createSession(final String name, final int ttlMs, final int lockDelay,
+                                       final ConsulSessionListener sessionListener) {
         // TODO: move http stuff into the session class.
+
         final ConsulSession newSession
-                = new ConsulSession(this.endpoint, "id", name, ttlMs, lockDelay);
+                = new ConsulSession(this.endpoint, "id", name, ttlMs, lockDelay, sessionListener);
         final String sessionString = newSession.toJson();
         final Entity<String> entity = Entity.entity(sessionString, MediaType.APPLICATION_JSON);
         final Response response = httpClient
@@ -111,7 +113,8 @@ public class Consul {
         }
 
         final ConsulSession session
-                = ConsulSession.fromJsonResponse(newSession, response.readEntity(String.class));
+                = ConsulSession.fromJsonResponse(
+                newSession, response.readEntity(String.class), sessionListener);
         if (session != null) {
             session.startKeepAlive();
         }

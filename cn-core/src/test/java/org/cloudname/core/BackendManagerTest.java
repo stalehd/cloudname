@@ -67,6 +67,11 @@ public class BackendManagerTest {
             public void close() throws Exception {
 
             }
+
+            @Override
+            public void addBackendListener(BackendListener listener) {
+
+            }
         };
     }
 

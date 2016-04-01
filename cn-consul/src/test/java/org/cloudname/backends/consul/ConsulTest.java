@@ -54,7 +54,8 @@ public class ConsulTest {
         final Consul consul = new Consul(System.getProperty(EP_PROPERTY));
         assertTrue(consul.isValid());
 
-        final ConsulSession session = consul.createSession(getSessionName(), 10, 0);
+        final ConsulSession session = consul.createSession(getSessionName(), 10, 0,
+                (id) -> { fail("Did not expect the session to become invalid"); });
         assertThat(session, is(notNullValue()));
 
         assertThat(session.getId(), is(not("")));
@@ -67,7 +68,8 @@ public class ConsulTest {
         final Consul consul = new Consul(System.getProperty(EP_PROPERTY));
         assertTrue(consul.isValid());
 
-        final ConsulSession session = consul.createSession(getSessionName(), 10, 0);
+        final ConsulSession session = consul.createSession(getSessionName(), 10, 0,
+                (id) -> { fail("Did not expect session to die!"); });
         System.out.println(session.getId());
         assertThat(session, is(notNullValue()));
         assertTrue(consul.writeSessionData("TheKey", "TheValue", session.getId()));
@@ -101,7 +103,8 @@ public class ConsulTest {
                                        final Consul consul, final String path, final String value) {
         try {
             readyLatch.await();
-            final ConsulSession session = consul.createSession(getSessionName(), 10, 0);
+            final ConsulSession session = consul.createSession(getSessionName(), 10, 0,
+                    (id) -> { fail("Did not expect session to die!"); });
             assertTrue(consul.writeSessionData(path, value, session.getId()));
 
             createLatch.await();

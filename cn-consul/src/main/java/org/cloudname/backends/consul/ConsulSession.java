@@ -36,7 +36,7 @@ public class ConsulSession {
     private final Client httpClient = ClientBuilder.newClient();
     private final String behavior = "delete";
     private final AtomicBoolean closed = new AtomicBoolean(false);
-
+    private final ConsulSessionListener sessionListener;
     /**
      * Create new session object.
      *
@@ -48,12 +48,14 @@ public class ConsulSession {
      *                  (and reacquired). In seconds.
      */
     public ConsulSession(final String endpoint, final String id,
-                         final String name, final int ttl, final int lockDelay) {
+                         final String name, final int ttl, final int lockDelay,
+                         final ConsulSessionListener sessionListener) {
         this.endpoint = endpoint;
         this.id = id;
         this.name = name;
         this.ttl = ttl * 1000;
         this.lockDelay = lockDelay;
+        this.sessionListener = sessionListener;
     }
 
     /**
@@ -79,12 +81,15 @@ public class ConsulSession {
      * Build actual session from Consul Agent response. Only the ID field is returned, use the
      * submitted entity.
      */
-    public static ConsulSession fromJsonResponse(final ConsulSession submitted, final String json) {
+    public static ConsulSession fromJsonResponse(
+            final ConsulSession submitted,
+            final String json,
+            final ConsulSessionListener sessionListener) {
         try {
             final JSONObject ret = new JSONObject(json);
             // Note that the TTL returned is in milliseconds. Nice gotcha.
             return new ConsulSession(submitted.endpoint, ret.getString("ID"),
-                    submitted.name, submitted.ttl / 1_000, submitted.lockDelay);
+                    submitted.name, submitted.ttl / 1_000, submitted.lockDelay, sessionListener);
         } catch (final JSONException je) {
             LOG.log(Level.WARNING, "Couldn't grok JSON from Consul Agent. Response was " + json);
             return null;
@@ -106,6 +111,12 @@ public class ConsulSession {
                 if (response.getStatus() != Response.Status.OK.getStatusCode()) {
                     LOG.log(Level.WARNING, "Got " + response.getStatus()
                             + " from Consul Agent when renewing sessions, exepected 200");
+                    // Terminate session. This means the Consul cluster is unavailable.
+                    try {
+                        sessionListener.sessionExpired(id);
+                    } catch (final RuntimeException re) {
+                        LOG.log(Level.WARNING, "Got exception when invoking session listener", re);
+                    }
                 }
             }, ttl / 2, ttl / 2, TimeUnit.MILLISECONDS);
         } catch (final RejectedExecutionException re) {

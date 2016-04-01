@@ -34,6 +34,16 @@ public class ConsulBackendTest extends CoreBackendTest {
         return backend.get();
     }
 
+    @Override
+    protected void setBackendAvailable() {
+
+    }
+
+    @Override
+    protected void setBackendUnavailable() {
+
+    }
+
     /**
      * The propagation through Consul isn't as fast as ZooKeeper, at least not for local
      * nodes. The API will occasionally need a second to move everything around, particularly
